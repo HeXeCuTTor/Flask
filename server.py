@@ -1,189 +1,229 @@
-from typing import Type
-import pydantic
-from flask import Flask, jsonify, request
-from flask.views import MethodView
+import json
+from aiohttp import web
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 
 from auth import hash_password, check_password
-from models import Session, User, Ads
-from schema import CreateUser, UpdateUser
+from models import Base, engine, Session, User, Ads
 
-app = Flask("app")
-
-
-class HttpError(Exception):
-    def __init__(self, status_code: int, message: str | dict | list):
-        self.status_code = status_code
-        self.message = message
+app = web.Application()
 
 
-@app.errorhandler(HttpError)
-def error_handler(er: HttpError):
-    response = jsonify({"status": "error", "message": er.message})
-    response.status_code = er.status_code
-    return response
+@web.middleware
+async def session_middleware(request: web.Request, handler):
+    async with Session() as session:
+        request["session"] = session
+        response = await handler(request)
+        return response
 
 
-def validate(validation_schema: Type[CreateUser] | Type[UpdateUser], json_data):
-    try:
-        pydantic_obj = validation_schema(**json_data)
-        return pydantic_obj.dict(exclude_none=True)
-    except pydantic.ValidationError as er:
-        raise HttpError(400, er.errors())
-
-
-def get_user(session: Session, user_id: int):
-    user = session.get(User, user_id)
+async def get_user(session: Session, user_id: int):
+    user = await session.get(User, user_id)
     if user is None:
-        raise HttpError(404, "user not found")
+        raise web.HTTPNotFound(
+            text=json.dumps({"error": "user not found"}),
+            content_type="application/json",
+        )
     return user
 
-def get_ads(session: Session, ads_id: int):
-    ads = session.get(Ads, ads_id)
+async def get_ads(session: Session, ads_id: int):
+    ads = await session.get(Ads, ads_id)
     if ads is None:
-        raise HttpError(404, "ads not found")
+        raise web.HTTPNotFound(
+            text=json.dumps({"error": "ads not found"}),
+            content_type="application/json",
+        )
     return ads
 
 
-class UserViews(MethodView):
-    def get(self, user_id: int):
-        with Session() as session:
-            user = get_user(session, user_id)
-            return jsonify(
+class UserView(web.View):
+    @property
+    def session(self):
+        return self.request["session"]
+
+    @property
+    def user_id(self):
+        return int(self.request.match_info["user_id"])
+    
+    async def get(self):
+            user = await get_user(self.session, self.user_id)
+            return web.json_response(
                 {
                     "id": user.id,
                     "name": user.name,
-                    "creation_time": user.creation_time.isoformat(),
+                    "creation_time": int(user.creation_time.timestamp()),
                 }
             )
 
-    def post(self):
-        validated_data = validate(CreateUser, request.json)
-        validated_data["password"] = hash_password(validated_data["password"])
-        with Session() as session:
-            new_user = User(**validated_data)
-            session.add(new_user)
-            try:
-                session.commit()
-            except IntegrityError as er:
-                raise HttpError(409, "user already exist")
-            return jsonify({"id": new_user.id})
-
-    def patch(self, user_id):
-        validated_data = validate(UpdateUser, request.json)
-        if "password" in validated_data:
-            validated_data["password"] = hash_password(validated_data["password"])
-        with Session() as session:
-            user = get_user(session, user_id)
-            for field, value in validated_data.items():
-                setattr(user, field, value)
-            session.add(user)
-            try:
-                session.commit()
-            except IntegrityError as er:
-                raise HttpError(409, "user already exist")
-            return jsonify({"id": user.id})
-
-    def delete(self, user_id: int):
-        with Session() as session:
-            user = get_user(session, user_id)
-            session.delete(user)
-            session.commit()
-            return jsonify({"status": "deleted"})
-
-
-user_view = UserViews.as_view("users")
-
-app.add_url_rule(
-    "/user/<int:user_id>", view_func=user_view, methods=["GET", "PATCH", "DELETE"]
-)
-app.add_url_rule("/user", view_func=user_view, methods=["POST"])
-
-
-class AdsViews(MethodView):
-    def get(self, ads_id: int):
-        with Session() as session:
-            ads = get_ads(session, ads_id)
-            return jsonify(
-                {
-                    "id": ads.id,
-                    "title": ads.title,
-                    "description": ads.description,
-                    "creation_time": ads.creation_time.isoformat(),
-                    "user_id": ads.user_id
-                }
+    async def post(self):
+        json_data = await self.request.json()
+        json_data["password"] = hash_password(json_data["password"])
+        new_user = User(**json_data)
+        try:
+            self.session.add(new_user)
+            await self.session.commit()
+        except IntegrityError as er:
+            raise web.HTTPConflict(
+                text=json.dumps({"error": "user already exists"}),
+                content_type="application/json",
             )
-    def post(self):
-        user_data = request.headers
-        ads_data = request.json
-        check_pass = hash_password(user_data["password"])
-        with Session() as session:
-            user = session.query(User).filter(User.name == user_data["name"]).all()
-            right_pass = user[0].password
-            if user == []:
-                raise HttpError(401, "wrong user")
+        return web.json_response({"id": new_user.id})
+
+    async def patch(self):
+        json_data = await self.request.json()
+        if "password" in json_data:
+            json_data["password"] = hash_password(json_data["password"])
+        user = await get_user(self.session, self.user_id)
+        for field, value in json_data.items():
+            setattr(user, field, value)
+        try:
+            self.session.add(user)    
+            self.session.commit()
+        except IntegrityError as er:
+            raise web.HTTPConflict(
+                text=json.dumps({"error": "user already exists"}),
+                content_type="application/json",
+            )
+        return web.json_response({"id": user.id})
+
+    async def delete(self):
+        user = await get_user(self.session, self.user_id)
+        await self.session.delete(user)
+        await self.session.commit()
+        return web.json_response({"id": user.id})
+    
+
+class AdsView(web.View):
+    @property
+    def session(self):
+        return self.request["session"]
+
+    @property
+    def ads_id(self):
+        return int(self.request.match_info["ads_id"])    
+
+    async def get(self):
+        ads = await get_ads(self.session, self.ads_id)
+        return web.json_response(
+            {
+                "id": ads.id,
+                "title": ads.title,
+                "description": ads.description,
+                "creation_time": int(ads.creation_time.timestamp()),
+                "user_id": ads.user_id
+            }
+        )
+    async def post(self):
+        user_data = self.request.headers
+        ads_data = await self.request.json()
+        check_pass = user_data["password"]
+        user = await self.session.execute(select(User).where(User.name == user_data["name"]))
+        user_models = (user.mappings().all())[0].get(User)
+        right_pass = user_models.password
+        if user == []:
+            raise web.HTTPNotFound(
+                text=json.dumps({"error": "user not found"}),
+                content_type="application/json",
+            )
+        else:
+            if check_password(right_pass, check_pass) is True:
+                ads_data.update({"user_id": user_models.id})
+                new_ads = Ads(**ads_data)
+                self.session.add(new_ads)
+                await self.session.commit()
+                return web.json_response({"id": new_ads.id})
             else:
-                if check_password(right_pass, check_pass) is True:
-                    ads_data.update({"user_id": user[0].id})
+                raise web.HTTPUnauthorized(
+                    text=json.dumps({"error": "wrong password"}),
+                    content_type="application/json",
+                )
+    async def patch(self):
+        user_data = self.request.headers
+        ads_data = await self.request.json()
+        check_pass = user_data["password"]
+        user = await self.session.execute(select(User).where(User.name == user_data["name"]))
+        user_models = (user.mappings().all())[0].get(User)
+        right_pass = user_models.password
+        if user == []:
+            raise web.HTTPNotFound(
+                text=json.dumps({"error": "user not found"}),
+                content_type="application/json",
+            )
+        else:
+            if check_password(right_pass, check_pass) is True:
+                ads = await get_ads(self.session, self.ads_id)
+                if ads.user_id == user_models.id:
+                    ads_data.update({"user_id": user_models.id})
+                    for field, value in ads_data.items():
+                        setattr(ads, field, value)
+                        self.session.add(ads)
                     new_ads = Ads(**ads_data)
-                    session.add(new_ads)
-                    session.commit()
-                    return jsonify({"id": new_ads.id})
+                    self.session.add(new_ads)
+                    await self.session.commit()
+                    return web.json_response({"id": ads.id, "name": ads.title})
                 else:
-                    raise HttpError(401, "wrong password")
-
-    def patch(self, ads_id:int):
-        user_data = request.headers
-        ads_data = request.json
-        check_pass = hash_password(user_data["password"])
-        with Session() as session:
-            user = session.query(User).filter(User.name == user_data["name"]).all()
-            right_pass = user[0].password
-            if user == []:
-                raise HttpError(401, "user not found")
+                    raise web.HTTPConflict(
+                        text=json.dumps({"error": "user has not access"}),
+                        content_type="application/json",
+                    )
             else:
-                if check_password(right_pass, check_pass) is True:
-                    ads = get_ads(session, ads_id)
-                    if ads.user_id == user[0].id:
-                        ads_data.update({"user_id": user[0].id})
-                        for field, value in ads_data.items():
-                            setattr(ads, field, value)
-                            session.add(ads)
-                        new_ads = Ads(**ads_data)
-                        session.add(new_ads)
-                        session.commit()
-                        return jsonify({"id": ads.id, "name": ads.title})
-                    else:
-                        raise HttpError(401, "user has not access")
-                else:
-                    raise HttpError(401, "wrong password")
+                raise web.HTTPUnauthorized(
+                    text=json.dumps({"error": "wrong password"}),
+                    content_type="application/json",
+                )
 
-    def delete(self, ads_id: int):
-        user_data = request.headers
-        check_pass = hash_password(user_data["password"])
-        with Session() as session:
-            user = session.query(User).filter(User.name == user_data["name"]).all()
-            right_pass = user[0].password
-            if user == []:
-                raise HttpError(404, "user not found")
+    async def delete(self):
+        user_data = self.request.headers
+        check_pass = user_data["password"]
+        user = await self.session.execute(select(User).where(User.name == user_data["name"]))
+        user_models = (user.mappings().all())[0].get(User)
+        right_pass = user_models.password
+        if user == []:
+            raise web.HTTPNotFound(
+                text=json.dumps({"error": "user not found"}),
+                content_type="application/json",
+            )
+        else:
+            if check_password(right_pass, check_pass) is True:
+                ads = await get_ads(self.session, self.ads_id)
+                if ads.user_id == user_models.id:
+                    await self.session.delete(ads)
+                    await self.session.commit()
+                    return web.json_response({"status": "deleted"})
+                else:
+                    raise web.HTTPConflict(
+                        text=json.dumps({"error": "user has not access"}),
+                        content_type="application/json",
+                    )
             else:
-                if check_password(right_pass, check_pass) is True:
-                    ads = get_ads(session, ads_id)
-                    if ads.user_id == user[0].id:
-                        session.delete(ads)
-                        session.commit()
-                        return jsonify({"status": "deleted"})
-                    else:
-                        raise HttpError(401, "user has not access")
-                else:
-                    raise HttpError(401, "wrong password")
+                raise web.HTTPUnauthorized(
+                    text=json.dumps({"error": "wrong password"}),
+                    content_type="application/json",
+                )
 
-ads_view = AdsViews.as_view("ads")
+async def orm_context(app: web.Application):
+    print("START")
+    async with engine.begin() as con:
+        await con.run_sync(Base.metadata.create_all)
+    yield
+    print("SHUT DOWN")
+    await engine.dispose()
 
-app.add_url_rule(
-    "/ads/<int:ads_id>", view_func=ads_view, methods=["GET", "PATCH", "DELETE"]
+app.cleanup_ctx.append(orm_context)
+app.middlewares.append(session_middleware)  
+
+app.add_routes(
+    [
+        web.post("/users/", UserView),
+        web.get("/users/{user_id:\d+}", UserView),
+        web.patch("/users/{user_id:\d+}", UserView),
+        web.delete("/users/{user_id:\d+}", UserView),
+        web.post("/ads/", AdsView),
+        web.get("/ads/{ads_id:\d+}", AdsView),
+        web.patch("/ads/{ads_id:\d+}", AdsView),
+        web.delete("/ads/{ads_id:\d+}", AdsView),
+    ]
 )
-app.add_url_rule("/ads", view_func=ads_view, methods=["POST"])
 
 if __name__ == "__main__":
-    app.run()
+    web.run_app(app)

@@ -5,8 +5,15 @@ services:
   db:
     image: postgres:latest
     ports:
-      - "5430:5432"
+      - "5220:5432"
     environment:
       POSTGRES_USER: ${PG_USER}
       POSTGRES_PASSWORD: ${PG_PASSWORD}
       POSTGRES_DB: ${PG_DB}
+
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db

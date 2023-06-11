@@ -1,35 +1,107 @@
-import requests
+import asyncio
+import aiohttp
 
-# response = requests.post('http://127.0.0.1:5000/user', json={"name": 'user_6', 'password': 'rexroou5464556'})
-# print(response.status_code)
-# print(response.text)
+async def main():
+    async with aiohttp.ClientSession() as session:
+    #     print("create")
+    #     response = await session.post(
+    #         "http://127.0.0.1:8080/users/", json={"name": "user_5", "password": "12345"}
+    #     )
+    #     print(response.status)
+    #     json_data = await response.json()
+    #     print(json_data)
 
-# response = requests.get('http://127.0.0.1:5000/user/1')
-# print(response.status_code)
-# print(response.text)
+        # print("get")
+        # response = await session.get(
+        #     "http://127.0.0.1:8080/users/20",
+        # )
+        # print(response.status)
+        # json_data = await response.json()
+        # print(json_data)
 
+        # print("patch")
+        # response = await session.patch(
+        #     "http://127.0.0.1:8080/users/20", json={"name": "user_22"}
+        # )
+        # print(response.status)
+        # json_data = await response.json()
+        # print(json_data)
 
-# response = requests.patch('http://127.0.0.1:5000/user/7', json={"name": "new_user_name"})
-# print(response.status_code)
-# print(response.text)
+        # print("get")
+        # response = await session.get(
+        #     "http://127.0.0.1:8080/users/20",
+        # )
+        # print(response.status)
+        # json_data = await response.json()
+        # print(json_data)
 
-# response = requests.delete("http://127.0.0.1:5000/user/7")
-# print(response.status_code)
-# print(response.text)
+        # print("delete")
+        # response = await session.delete(
+        #     "http://127.0.0.1:8080/users/1",
+        # )
+        # print(response.status)
+        # json_data = await response.json()
+        # print(json_data)
 
+        # print("get")
+        # response = await session.get(
+        #     "http://127.0.0.1:8080/users/20",
+        # )
+        # print(response.status)
+        # json_data = await response.json()
+        # print(json_data)
 
-# response = requests.get("http://127.0.0.1:5000/ads/2")
-# print(response.status_code)
-# print(response.text)
+        # print("create")
+        # response = await session.post(
+        #     "http://127.0.0.1:8080/ads/", 
+        #     headers={"name": 'user_5', 'password': '12345'}, 
+        #     json={"title": 'my_ads', 'description': 'My Best Ads'}
+        # )
+        # print(response.status)
+        # json_data = await response.json()
+        # print(json_data)   
 
-# response = requests.post('http://127.0.0.1:5000/ads', headers={"name": 'user_6', 'password': 'rexroou5464556'}, json={"title": 'my_ads', 'description': 'My Best Ads'})
-# print(response.status_code)
-# print(response.text)
+        # print("get")
+        # response = await session.get(
+        #     "http://127.0.0.1:8080/ads/1",
+        # )
+        # print(response.status)
+        # json_data = await response.json()
+        # print(json_data)
 
-# response = requests.patch('http://127.0.0.1:5000/ads/48', headers={"name": 'user_4', 'password': '123gwesgtewt544'}, json={"title": 'funny_ads', 'description': 'My Best Ads'})
-# print(response.status_code)
-# print(response.text)
+        # print("patch")
+        # response = await session.patch(
+        #     "http://127.0.0.1:8080/ads/1", 
+        #     headers={"name": 'user_5', 'password': '12345'}, 
+        #     json={"title": 'funny_ads', 'description': 'My Best Ads'}
+        # )
+        # print(response.status)
+        # json_data = await response.json()
+        # print(json_data)
 
-# response = requests.delete("http://127.0.0.1:5000/ads/16", headers={"name": 'user_4', 'password': '123gwesgtewt544'})
-# print(response.status_code)
-# print(response.text)
+        # print("get")
+        # response = await session.get(
+        #     "http://127.0.0.1:8080/ads/1",
+        # )
+        # print(response.status)
+        # json_data = await response.json()
+        # print(json_data)
+
+        # print("delete")
+        # response = await session.delete(
+        #     "http://127.0.0.1:8080/ads/1",
+        #     headers={"name": 'user_5', 'password': '12345'}
+        # )
+        # print(response.status)
+        # json_data = await response.json()
+        # print(json_data)
+
+        print("get")
+        response = await session.get(
+            "http://127.0.0.1:8080/ads/1",
+        )
+        print(response.status)
+        json_data = await response.json()
+        print(json_data)
+
+asyncio.run(main())
